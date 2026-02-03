@@ -1,5 +1,5 @@
 {
-  description = "LeRobot (SO-ARM101/SO-101) dev shell for NixOS + micromamba";
+  description = "LeRobot (SO-ARM101/SO-101) on NixOS via micromamba in FHS shell";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -9,52 +9,61 @@
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
+
+      # FHS environment: provides /bin/bash + standard loader paths
+      lerobotFhs = pkgs.buildFHSEnv {
+        name = "lerobot-fhs";
+        targetPkgs = pkgs: with pkgs; [
+          bashInteractive
+          coreutils
+          which
+          git
+
+          # runtime libs commonly needed by conda binaries
+          stdenv.cc.cc.lib
+          zlib
+          openssl
+          libffi
+          glib
+
+          # EGL/OpenGL userspace (for egl_probe-like deps)
+          mesa
+          libglvnd
+
+          # kernel headers for evdev build
+          linuxHeaders
+        ];
+        runScript = "bash";
+      };
     in {
       devShells.${system}.default = pkgs.mkShell {
         packages = with pkgs; [
-          # build toolchain (apt: build-essential, cmake, pkg-config, python3-dev)
+          lerobotFhs
+
+          # build deps for pip compiling native packages
           gcc
           gnumake
           cmake
           pkg-config
-          python310
-          python310Packages.pip
-          python310Packages.setuptools
-          python310Packages.wheel
-
-          # kernel headers (for evdev build)
           linuxHeaders
-
-          # ffmpeg headers/libs (apt: libav*dev, libsw*dev)
           ffmpeg
 
-          # EGL/OpenGL userspace headers/libs (for egl_probe-like builds)
-          mesa
-          libglvnd
-
-          # common native deps that often pop up during pip builds
-          git
-          patchelf
-          stdenv.cc.cc.lib
-          openssl
-          zlib
-
-          # conda replacement that behaves well in nix shells
+          # micromamba (we’ll run it inside the FHS shell)
           micromamba
         ];
 
-        # Helpful defaults for the CMake error you hit with egl_probe
-        # (modern CMake refuses cmake_minimum_required < 3.5)
         shellHook = ''
-          export CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5 ''${CMAKE_ARGS:-}"
-          export PIP_NO_BUILD_ISOLATION=1
-
-          # micromamba root in the repo (keeps things self-contained)
           export MAMBA_ROOT_PREFIX="$PWD/.mamba"
           mkdir -p "$MAMBA_ROOT_PREFIX"
 
-          echo "LeRobot dev shell ready."
-          echo "Next: run ./setup-lerobot.sh (first time) then 'micromamba activate lerobot'"
+          # helps the CMake policy issue you hit
+          export CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5 ''${CMAKE_ARGS:-}"
+          export PIP_NO_BUILD_ISOLATION=1
+
+          echo "Dev shell ready."
+          echo "Next:"
+          echo "  lerobot-fhs"
+          echo "  ./setup-lerobot.sh"
         '';
       };
     };
